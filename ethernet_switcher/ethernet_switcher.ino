@@ -3,148 +3,135 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
+#define ETHERNET_CS_PIN	16
+#define DEBUG		1
+
 String SendHTML(uint8_t led1stat, uint8_t led2stat, uint8_t led3stat);
-void handle_OnConnect();
+void handle_PinControl(uint8_t pin, bool state);
+void handle_OnConnect(bool state);
 void handle_NotFound();
 
-uint8_t LED1pin = 5;
-bool LED1status = HIGH;
+const uint8_t pin1 = 5;
+const uint8_t pin2 = 4;
+const uint8_t pin3 = 0;
+const uint8_t pin4 = 2;
 
-uint8_t LED2pin = 4;
-bool LED2status = LOW;
+bool pin1status = LOW;
+bool pin2status = LOW;
+bool pin3status = LOW;
+bool pin4status = LOW;
 
-uint8_t LED3pin = 0;
-bool LED3status = LOW;
-
-uint8_t LED4pin = 2;
-bool LED4status = LOW;
-
-byte mac[] = { 0xDE, 0xAD, 0xBB, 0xE5, 0x7E, 0xED };   //physical mac address
-// byte ip[] = { 10, 126, 12, 57 };                       //D port, ip in lan (that's what you need to use in your browser. ("192.168.1.178")
-// byte ip[] = { 172, 25, 3, 57 };                        //RD port
-// byte gateway[] = { 192, 168, 1, 1 };                   // internet access via router
-// byte subnet[] = { 255, 255, 255, 0 };                  //subnet mask
-EthernetServer server(80);                             //server port
+byte mac[] = { 0xDE, 0xAD, 0xBB, 0xE5, 0x7E, 0xED };   // Physical MAC address
+// byte ip[] = { 10, 126, 12, 57 };                       // D port, IP in LAN
+// byte ip[] = { 172, 25, 3, 57 };                        // RD port
+// byte gateway[] = { 192, 168, 1, 1 };                   // Internet access via router
+// byte subnet[] = { 255, 255, 255, 0 };                  // subnet mask
+EthernetServer server(80);                             // Server port
 EthernetClient client ;
 
 String readString;
 
 void setup() {
-	// Open serial communications and wait for port to open:
+#if DEBUG
+	// Open serial communications and wait for port to open
 	Serial.begin(9600);
-	Ethernet.init(16);
-
-	// start the Ethernet connection:
 	Serial.println("Initialize Ethernet with DHCP:");
-	// start the Ethernet connection and the server:
+#endif
+
+	// Setup with Ethernet Chip Select (CS) pin
+	Ethernet.init(ETHERNET_CS_PIN);
+
+	// Start the Ethernet connection and the server:
 	// Ethernet.begin(mac, ip); //, gateway, subnet);
 	if (Ethernet.begin(mac) == 0) {
+#if DEBUG
 		Serial.println("Failed to configure Ethernet using DHCP");
 		if (Ethernet.hardwareStatus() == EthernetNoHardware) {
 			Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
 		} else if (Ethernet.linkStatus() == LinkOFF) {
 			Serial.println("Ethernet cable is not connected.");
 		}
+#endif
 		// no point in carrying on, so do nothing forevermore:
 		while (true) {
 			delay(1);
 		}
 	}
+
+#if DEBUG
 	// print your local IP address:
 	Serial.print("My IP address: ");
 	Serial.println(Ethernet.localIP());
+#endif
 
 	pinMode(LED_BUILTIN, OUTPUT);
-	pinMode(LED1pin, OUTPUT);
-	pinMode(LED2pin, OUTPUT);
-	pinMode(LED3pin, OUTPUT);
-	// pinMode(LED4pin, OUTPUT);
+	pinMode(pin1, OUTPUT);
+	pinMode(pin2, OUTPUT);
+	pinMode(pin3, OUTPUT);
+	// pinMode(pin4, OUTPUT);
 
-	// digitalWrite(LED_BUILTIN, LOW);  // turn the LED on (HIGH is the voltage level)
-	digitalWrite(LED1pin, HIGH);
-	digitalWrite(LED2pin, HIGH);
-	digitalWrite(LED3pin, HIGH);
-	// digitalWrite(LED4pin, HIGH);
+	// turn the LED on (HIGH is the voltage level)
+	// digitalWrite(LED_BUILTIN, LOW);
+	digitalWrite(pin1, LOW);
+	digitalWrite(pin2, LOW);
+	digitalWrite(pin3, LOW);
+	// digitalWrite(pin4, HIGH);
 
 	delay(100);
 	server.begin();
-	client = server.available();
 }
 
 
 void loop() {
 	// Create a client connection
-	// EthernetClient client = server.available();
 	client = server.available();
+	bool onConnect_Set_Once = true;
+
 	if (client) {
 		while (client.connected()) {
-			digitalWrite(LED_BUILTIN, LOW);
-			if (client.available()) {
-				char c = client.read();
+			if (onConnect_Set_Once) {
+				// by default esp work on sink-in mode, LOW = GND,  HIGH = VCC
+				digitalWrite(LED_BUILTIN, LOW);     // LED is connected to VCC, so on LOW circuit get complete and LED is ON
+				digitalWrite(pin1, LOW);
+				digitalWrite(pin2, LOW);
+				digitalWrite(pin3, LOW);
+				onConnect_Set_Once = false;
+			}
 
-				//read char by char HTTP request
+			if (client.available()) {
+				char c = client.read();    //read char by char HTTP request
+
 				if (readString.length() < 100) {
-					//store characters to string
-					readString += c;
-					//Serial.print(c);
+					readString += c;    //store characters to string
 				}
 
 				//if HTTP request has ended
 				if (c == '\n') {
+#if DEBUG
 					Serial.println(readString); //print to serial monitor for debuging
-
-					if ((readString.indexOf("/ HTTP/1.1") >0) || (readString.indexOf("/favicon.ico") >0)){
-						Serial.println("Webpage active");
-						handle_OnConnect();
-						delay(1);
-						//stopping client
-						client.stop();
+#endif
+					if ((readString.indexOf("/ HTTP/1.1") > 0) || (readString.indexOf("/favicon.ico") > 0)) {
+						handle_OnConnect(true);
 					}
-					//controls the Arduino if you press the buttons
-					if (readString.indexOf("/relay1on") >0){
-						digitalWrite(LED1pin, LOW);
-						Serial.println("button1 ON");
-						handle_led1on();
-						//stopping client
-						client.stop();
+					if (readString.indexOf("/relay1on")  > 0) {
+						handle_PinControl(pin1, true);
 					}
-					if (readString.indexOf("/relay1off") >0){
-						digitalWrite(LED1pin, HIGH);
-						Serial.println("button1 OFF");
-						handle_led1off();
-						//stopping client
-						client.stop();
+					if (readString.indexOf("/relay1off") > 0) {
+						handle_PinControl(pin1, false);
 					}
-					if (readString.indexOf("/relay2on") >0){
-						digitalWrite(LED2pin, LOW);
-						Serial.println("button2 ON");
-						handle_led2on();
-						//stopping client
-						client.stop();
+					if (readString.indexOf("/relay2on")  > 0) {
+						handle_PinControl(pin2, true);
 					}
-					if (readString.indexOf("/relay2off") >0){
-						digitalWrite(LED2pin, HIGH);
-						Serial.println("button2 OFF");
-						handle_led2off();
-						//stopping client
-						client.stop();
+					if (readString.indexOf("/relay2off") > 0) {
+						handle_PinControl(pin2, false);
 					}
-					if (readString.indexOf("/relay3on") >0){
-						digitalWrite(LED3pin, LOW);
-						Serial.println("button3 ON");
-						handle_led3on();
-						//stopping client
-						client.stop();
+					if (readString.indexOf("/relay3on")  > 0) {
+						handle_PinControl(pin3, true);
 					}
-					if (readString.indexOf("/relay3off") >0){
-						digitalWrite(LED3pin, HIGH);
-						Serial.println("button3 OFF");
-						handle_led3off();
-						//stopping client
-						client.stop();
+					if (readString.indexOf("/relay3off") > 0) {
+						handle_PinControl(pin3, false);
 					}
-					//clearing string for next read
-					readString="";
+					readString="";    //clearing string for next read
 				}
 			}
 		}
@@ -152,91 +139,58 @@ void loop() {
 }
 
 
-void handle_OnConnect() {
-	LED1status = LOW;
-	LED2status = LOW;
-	LED3status = LOW;
-
+void handle_OnConnect(bool state) {
+	pin1status = state;
+	pin2status = state;
+	pin3status = state;
+#if DEBUG
+	Serial.println("Webpage active");
 	Serial.println("GPIO5 Status: OFF | GPIO4 Status: OFF | GPIO0 Status: OFF");
-
+#endif
 	client.println("HTTP/1.1 200 OK");
 	client.println("Content-Type: text/html");
 	// client.println("Connection: close");  // the connection will be closed after completion of the response
 	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(LED1status,LED2status));
+	client.println(SendHTML(pin1status, pin2status, pin3status));
+
+	delay(1);
+	client.stop();    //stopping client
 }
 
-void handle_led1on() {
-	LED1status = HIGH;
-	Serial.println("GPIO4 Status: ON");
+void handle_PinControl(uint8_t pin, bool state) {
+	switch(pin) {
+		case pin1  :	pin1status = state;
+				break;
+		case pin2  :	pin2status = state;
+				break;
+		case pin3  :	pin3status = state;
+				break;
+		default    :	return;
+	}
+
+/*	if      (pin == pin1)	pin1status = state;
+	else if (pin == pin2)	pin2status = state;
+	else if (pin == pin3)	pin3status = state;
+	else			return;
+*/
+
+#if DEBUG
+	Serial.print("GPIO");
+	Serial.print(pin);
+	Serial.print(" Status: ");
+	Serial.println(state);
+#endif
+
+	digitalWrite(pin, !state);
 
 	client.println("HTTP/1.1 200 OK");
 	client.println("Content-Type: text/html");
-	// client.println("Connection: close");  // the connection will be closed after completion of the response
+	// client.println("Connection: close");    // the connection will be closed after completion of the response
 	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(true,LED2status));
-}
+	client.println(SendHTML(pin1status, pin2status, pin3status));
 
-void handle_led1off() {
-	LED1status = LOW;
-	Serial.println("GPIO4 Status: OFF");
-
-	client.println("HTTP/1.1 200 OK");
-	client.println("Content-Type: text/html");
-	// client.println("Connection: close");  // the connection will be closed after completion of the response
-	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(false,LED2status));
-}
-
-void handle_led2on() {
-	LED2status = HIGH;
-	Serial.println("GPIO5 Status: ON");
-
-	client.println("HTTP/1.1 200 OK");
-	client.println("Content-Type: text/html");
-	// client.println("Connection: close");  // the connection will be closed after completion of the response
-	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(LED1status,true));
-}
-
-void handle_led2off() {
-	LED2status = LOW;
-	Serial.println("GPIO5 Status: OFF");
-
-	client.println("HTTP/1.1 200 OK");
-	client.println("Content-Type: text/html");
-	// client.println("Connection: close");  // the connection will be closed after completion of the response
-	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(LED1status,false));
-}
-
-void handle_led3on() {
-	LED3status = HIGH;
-	Serial.println("GPIO0 Status: ON");
-
-	client.println("HTTP/1.1 200 OK");
-	client.println("Content-Type: text/html");
-	// client.println("Connection: close");  // the connection will be closed after completion of the response
-	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(LED1status,true));
-}
-
-void handle_led3off() {
-	LED3status = LOW;
-	Serial.println("GPIO0 Status: OFF");
-
-	client.println("HTTP/1.1 200 OK");
-	client.println("Content-Type: text/html");
-	// client.println("Connection: close");  // the connection will be closed after completion of the response
-	client.println();
-	client.println(SendHTML(LED1status,LED2status,LED3status));
-	// server.send(200, "text/html", SendHTML(LED1status,false));
+	delay(1);
+	client.stop();    //stopping client
 }
 
 void handle_NotFound(){
@@ -265,17 +219,17 @@ String SendHTML(uint8_t led1stat, uint8_t led2stat, uint8_t led3stat){
 	ptr +="<h1>Ethernet Web Server</h1>\n";
 	ptr +="<h3>Relay Control using Ethernet</h3>\n";
 
-	if(led1stat)
+	if (led1stat)
 		{ptr +="<p>relay1 Status: OFF</p><a class=\"button button-off\" href=\"/relay1off\">OFF</a>\n";}
 	else
 		{ptr +="<p>relay1 Status: ON</p><a class=\"button button-on\" href=\"/relay1on\">ON</a>\n";}
 
-	if(led2stat)
+	if (led2stat)
 		{ptr +="<p>relay2 Status: OFF</p><a class=\"button button-off\" href=\"/relay2off\">OFF</a>\n";}
 	else
 		{ptr +="<p>relay2 Status: ON</p><a class=\"button button-on\" href=\"/relay2on\">ON</a>\n";}
 
-	if(led3stat)
+	if (led3stat)
 		{ptr +="<p>relay3 Status: OFF</p><a class=\"button button-off\" href=\"/relay3off\">OFF</a>\n";}
 	else
 		{ptr +="<p>relay3 Status: ON</p><a class=\"button button-on\" href=\"/relay3on\">ON</a>\n";}
